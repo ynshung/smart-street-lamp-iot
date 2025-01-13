@@ -16,6 +16,7 @@ const char* MQ2sensor = "dc518777-708d-42cf-8e65-2b004ac00cb9";
 const char* dht11Sensor = "34b8e0a0-6f59-40af-9266-7de944d45787";
 const char* relayLight = "40b320c4-c7a2-48fc-accd-92aff5cdc7c3";
 const char* overrideMode = "cec8ba0c-c793-4959-ac74-6edf36433132";
+const char* pirSensor = "87ca7c10-c265-456a-930c-77a1dd1e6553";
 
 //Used Pins
 const int lightPin = 36;
@@ -23,6 +24,7 @@ const int MQ2pin = 34;
 const int dht11Pin = 25;
 const int relayPin = 32;
 const int overridePin = 27;
+const int pirPin = 23;
 
 DHT dht(dht11Pin, DHTTYPE);
 
@@ -32,11 +34,25 @@ DHT dht(dht11Pin, DHTTYPE);
 VOneMqttClient voneClient;
 
 const int telemetryInterval = 5000;
-const int updateInterval = 100;
+const int updateInterval = 2000;
+const int pirSensorDelay = 15000;
 
 //last message time
 unsigned long lastMsgTime = 0;
 unsigned long lastUpdateTime = 0;
+
+unsigned long lastTrigger = 0;
+boolean PIRvalue = false;
+
+void IRAM_ATTR detectsMovement() {
+  PIRvalue = true;
+  lastTrigger = millis();
+  Serial.println("Motion detected!");
+
+  if (!inOverride && LightLevel < 50) {
+    digitalWrite(relayPin, true);
+  }
+}
 
 void setup_wifi() {
 
@@ -60,78 +76,73 @@ void setup_wifi() {
   Serial.println(WiFi.localIP());
 }
 
-void triggerActuator_callback(const char* actuatorDeviceId, const char* actuatorCommand)
-{ 
-    //actuatorCommand format {"servo":90}
-    Serial.print("Main received callback : ");
-    Serial.print(actuatorDeviceId);
-    Serial.print(" : ");
-    Serial.println(actuatorCommand);
-    
-    String errorMsg = "";  
+void triggerActuator_callback(const char* actuatorDeviceId, const char* actuatorCommand) {
+  //actuatorCommand format {"servo":90}
+  Serial.print("Main received callback : ");
+  Serial.print(actuatorDeviceId);
+  Serial.print(" : ");
+  Serial.println(actuatorCommand);
 
-    JSONVar commandObject = JSON.parse(actuatorCommand);
-    JSONVar keys = commandObject.keys();
-      
-    if(String(actuatorDeviceId) == overrideMode)
-    {
-        String key = "";
-        boolean commandValue = false;
-        for (int i = 0; i < keys.length(); i++) {
-           key = (const char* )keys[i];
-           commandValue = (bool)commandObject[keys[i]];
-          Serial.print("Key : ");
-          Serial.println(key.c_str());
-          Serial.print("value : ");
-          Serial.println(commandValue);
-        }
-        
-        if(commandValue == true){ 
-          inOverride = true;
-          digitalWrite(overridePin, HIGH);
-        }
-        else {
-          inOverride = false;
-          digitalWrite(overridePin, LOW);
-        }  
+  String errorMsg = "";
 
-        voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, true);
-        //Sample publish actuator fail status   
-        //errorMsg = "LED unable to light up.";
-        //voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, errorMsg.c_str(), false);
+  JSONVar commandObject = JSON.parse(actuatorCommand);
+  JSONVar keys = commandObject.keys();
+
+  if (String(actuatorDeviceId) == overrideMode) {
+    String key = "";
+    boolean commandValue = false;
+    for (int i = 0; i < keys.length(); i++) {
+      key = (const char*)keys[i];
+      commandValue = (bool)commandObject[keys[i]];
+      Serial.print("Key : ");
+      Serial.println(key.c_str());
+      Serial.print("value : ");
+      Serial.println(commandValue);
     }
 
-      
-    if(String(actuatorDeviceId) == relayLight)
-    {
-      if (inOverride) {
-        String key = "";
-        boolean commandValue = false;
-        for (int i = 0; i < keys.length(); i++) {
-           key = (const char* )keys[i];
-           commandValue = (bool)commandObject[keys[i]];
-          Serial.print("Key : ");
-          Serial.println(key.c_str());
-          Serial.print("value : ");
-          Serial.println(commandValue);
-        }
-        
-        if(commandValue == true){ 
-           Serial.println("Relay ON");                
-           digitalWrite(relayPin, true);
-        }
-        else {
-          Serial.println("Relay OFF");    
-          digitalWrite(relayPin, false);
-        }  
+    if (commandValue == true) {
+      inOverride = true;
+      digitalWrite(overridePin, HIGH);
+    } else {
+      inOverride = false;
+      digitalWrite(overridePin, LOW);
+    }
 
-        voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, true);
-      } else {
-        // errorMsg = "Override mode is not on.";
-        // voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, errorMsg.c_str(), false);
-        voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, true);
+    voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, true);
+    //Sample publish actuator fail status
+    //errorMsg = "LED unable to light up.";
+    //voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, errorMsg.c_str(), false);
+  }
+
+
+  if (String(actuatorDeviceId) == relayLight) {
+    if (inOverride) {
+      String key = "";
+      boolean commandValue = false;
+      for (int i = 0; i < keys.length(); i++) {
+        key = (const char*)keys[i];
+        commandValue = (bool)commandObject[keys[i]];
+        Serial.print("Key : ");
+        Serial.println(key.c_str());
+        Serial.print("value : ");
+        Serial.println(commandValue);
       }
+
+      if (commandValue == true) {
+        Serial.println("Relay ON");
+        digitalWrite(relayPin, true);
+      } else {
+        Serial.println("Relay OFF");
+        digitalWrite(relayPin, false);
+      }
+
+      voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, true);
+    } else {
+      // errorMsg = "Override mode is not on.";
+      // voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, errorMsg.c_str(), false);
+      voneClient.publishActuatorStatusEvent(actuatorDeviceId, actuatorCommand, true);
     }
+  }
 }
 
 void setup() {
@@ -141,7 +152,10 @@ void setup() {
   dht.begin();
   pinMode(relayPin, OUTPUT);
   pinMode(overridePin, OUTPUT);
+  pinMode(pirPin, INPUT);
   inOverride = false;
+
+  attachInterrupt(digitalPinToInterrupt(pirPin), detectsMovement, RISING);
 }
 
 void loop() {
@@ -152,9 +166,10 @@ void loop() {
     voneClient.publishDeviceStatusEvent(LightMeter, true);
     voneClient.publishDeviceStatusEvent(MQ2sensor, true);
     voneClient.publishDeviceStatusEvent(dht11Sensor, true);
+    voneClient.publishDeviceStatusEvent(pirSensor, true);
   }
   voneClient.loop();
-  
+
 
   unsigned long cur = millis();
   if (cur - lastMsgTime > telemetryInterval) {
@@ -162,25 +177,31 @@ void loop() {
 
     //Publish telemtry data
     voneClient.publishTelemetryData(LightMeter, "Light", LightLevel);
+    voneClient.publishTelemetryData(pirSensor, "Motion", PIRvalue);
 
     float gasValue = analogRead(MQ2pin);
     voneClient.publishTelemetryData(MQ2sensor, "Gas detector", gasValue);
 
-    float humidity = dht.readHumidity(); // Read humidity
-    float temperature = dht.readTemperature(); // Read temperature
+    float humidity = dht.readHumidity();        // Read humidity
+    float temperature = dht.readTemperature();  // Read temperature
 
-    JSONVar payloadObject;    
+    JSONVar payloadObject;
     payloadObject["Humidity"] = humidity;
     payloadObject["Temperature"] = temperature;
     voneClient.publishTelemetryData(dht11Sensor, payloadObject);
   }
-  if (!inOverride && cur - lastUpdateTime > 1000) {
+  if (!inOverride && cur - lastUpdateTime > updateInterval) {
     lastUpdateTime = cur;
 
     int lightValue = analogRead(lightPin);
     LightLevel = map(lightValue, MinLightValue, MaxLightValue, MinOutput, MaxOutput);
 
-    if (LightLevel < 50) {
+    if (cur - lastTrigger > pirSensorDelay) {
+      PIRvalue = false;
+      voneClient.publishTelemetryData(pirSensor, "Motion", PIRvalue);
+    }
+
+    if (LightLevel < 50 && PIRvalue == true) {
       digitalWrite(relayPin, true);
     } else {
       digitalWrite(relayPin, false);
