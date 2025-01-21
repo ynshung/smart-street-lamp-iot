@@ -2,6 +2,7 @@
 #include "DHT.h"
 #define DHTTYPE DHT11
 
+const int lightThreshold = 50;
 int MinLightValue = 200;
 int MaxLightValue = 3200;
 int MinOutput = 0;
@@ -25,6 +26,7 @@ const int dht11Pin = 25;
 const int relayPin = 32;
 const int overridePin = 27;
 const int pirPin = 23;
+const int motionPin = 10;
 
 DHT dht(dht11Pin, DHTTYPE);
 
@@ -48,6 +50,7 @@ void IRAM_ATTR detectsMovement() {
   PIRvalue = true;
   lastTrigger = millis();
   Serial.println("Motion detected!");
+  digitalWrite(motionPin, HIGH);
 
   if (!inOverride && LightLevel < 50) {
     digitalWrite(relayPin, true);
@@ -152,6 +155,7 @@ void setup() {
   dht.begin();
   pinMode(relayPin, OUTPUT);
   pinMode(overridePin, OUTPUT);
+  pinMode(motionPin, OUTPUT);
   pinMode(pirPin, INPUT);
   inOverride = false;
 
@@ -172,6 +176,24 @@ void loop() {
 
 
   unsigned long cur = millis();
+  if (!inOverride && cur - lastUpdateTime > updateInterval) {
+    lastUpdateTime = cur;
+
+    int lightValue = analogRead(lightPin);
+    LightLevel = map(lightValue, MinLightValue, MaxLightValue, MinOutput, MaxOutput);
+
+    if (PIRvalue && cur - lastTrigger > pirSensorDelay) {
+      PIRvalue = false;
+      digitalWrite(motionPin, LOW);
+      voneClient.publishTelemetryData(pirSensor, "Motion", PIRvalue);
+    }
+
+    if (LightLevel < lightThreshold && PIRvalue) {
+      digitalWrite(relayPin, true);
+    } else {
+      digitalWrite(relayPin, false);
+    }
+  }
   if (cur - lastMsgTime > telemetryInterval) {
     lastMsgTime = cur;
 
@@ -189,22 +211,5 @@ void loop() {
     payloadObject["Humidity"] = humidity;
     payloadObject["Temperature"] = temperature;
     voneClient.publishTelemetryData(dht11Sensor, payloadObject);
-  }
-  if (!inOverride && cur - lastUpdateTime > updateInterval) {
-    lastUpdateTime = cur;
-
-    int lightValue = analogRead(lightPin);
-    LightLevel = map(lightValue, MinLightValue, MaxLightValue, MinOutput, MaxOutput);
-
-    if (cur - lastTrigger > pirSensorDelay) {
-      PIRvalue = false;
-      voneClient.publishTelemetryData(pirSensor, "Motion", PIRvalue);
-    }
-
-    if (LightLevel < 50 && PIRvalue == true) {
-      digitalWrite(relayPin, true);
-    } else {
-      digitalWrite(relayPin, false);
-    }
   }
 }
