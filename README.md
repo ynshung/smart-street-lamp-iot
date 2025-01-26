@@ -1,2 +1,2 @@
 # smart-street-lamp-iot
-Smart Street Lamp with Environment Monitoring - CPC354 Project
+Smart Street Lamp with Environment Monitoring - CPC357 Project
